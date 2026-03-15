@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Ansi from 'ansi-to-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { Activity, AlertCircle, AlertTriangle, AppWindow, Bot, Check, CheckCircle2, ChevronDown, Circle, CircleDashed, Cpu, FileText, Folder, FolderTree, GitBranch, Loader2, ListChecks, MoreHorizontal, ShieldCheck, SignalHigh, SignalLow, SignalMedium, Square, Terminal, User, Users, Wrench, Clock, Search, LayoutDashboard, ListTodo, History, Ticket, Database, Settings2, Sun, Moon, Download, RefreshCcw, Info, BarChart3, Zap, Layout, Rows, Play, ChevronRight, File, ExternalLink, Plus, Trash2, Keyboard, X, TrendingUp, Code, Layers } from 'lucide-react'
+import { Activity, AlertCircle, AlertTriangle, AppWindow, Bot, Check, CheckCircle2, ChevronDown, Circle, CircleDashed, Cpu, FileText, Folder, FolderTree, GitBranch, Loader2, ListChecks, MoreHorizontal, ShieldCheck, SignalHigh, SignalLow, SignalMedium, Square, Terminal, User, Users, Wrench, Clock, Search, LayoutDashboard, ListTodo, History, Ticket, Database, Settings2, Sun, Moon, Download, RefreshCcw, Info, BarChart3, Zap, Layout, Rows, Play, ChevronRight, File, ExternalLink, Plus, Trash2, Keyboard, X, TrendingUp, Code, Layers, Globe } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,12 @@ import {
   type IssueListItem,
   type MCPTool,
   type WorkspaceMigrationResult,
+  fetchUnsandboxConfig,
+  saveUnsandboxConfig,
+  deleteUnsandboxConfig,
+  fetchUnsandboxStatus,
+  type UnsandboxConfig,
+  type UnsandboxStatus,
 } from '@/lib/orchestra-client'
 import type { SnapshotPayload, Project, ProjectStats, GlobalStats } from '@/lib/orchestra-types'
 import { usePlatform } from '@/hooks/use-platform'
@@ -317,11 +323,12 @@ export function SettingsCard({
   onSaveAgentConfig: (config: { commands: Record<string, string>; agent_provider: string }) => Promise<void>
 }) {
   const { isMac } = usePlatform()
-  const [activeTab, setActiveTab] = useState<'backend' | 'agents' | 'migration' | 'shortcuts'>('backend')
+  const [activeTab, setActiveTab] = useState<'backend' | 'agents' | 'integrations' | 'migration' | 'shortcuts'>('backend')
 
   const tabs = [
     { id: 'backend', label: 'Backend', tooltip: 'Configure backend profiles and API connection', icon: <Database className="h-3.5 w-3.5" /> },
     { id: 'agents', label: 'Agents', tooltip: 'Set provider commands and default runner', icon: <Zap className="h-3.5 w-3.5" /> },
+    { id: 'integrations', label: 'Integrations', tooltip: 'Configure external service connections', icon: <Globe className="h-3.5 w-3.5" /> },
     { id: 'migration', label: 'Migration', tooltip: 'Plan and apply workspace migrations', icon: <RefreshCcw className="h-3.5 w-3.5" /> },
     { id: 'shortcuts', label: 'Shortcuts', tooltip: 'View global keyboard shortcuts', icon: <Keyboard className="h-3.5 w-3.5" /> },
   ] as const
@@ -391,6 +398,16 @@ export function SettingsCard({
                   <p className="text-xs italic uppercase tracking-wider">No agent configuration loaded from active profile.</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'integrations' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                <Globe className="h-3.5 w-3.5" />
+                External Services
+              </div>
+              <UnsandboxConfigForm config={config} disabled={savingConfig || loadingConfig} />
             </div>
           )}
 
@@ -1094,6 +1111,190 @@ export function MetricCard({ title, value, hint, icon }: { title: string; value:
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// --- Unsandbox Integration Config ---
+
+function UnsandboxConfigForm({ config, disabled }: { config: BackendConfig | null; disabled: boolean }) {
+  const [publicKey, setPublicKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<UnsandboxStatus | null>(null)
+  const [unsandboxConfig, setUnsandboxConfig] = useState<UnsandboxConfig | null>(null)
+  const [message, setMessage] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  // Load current config on mount
+  useEffect(() => {
+    if (!config) return
+    fetchUnsandboxConfig(config)
+      .then((cfg) => {
+        setUnsandboxConfig(cfg)
+        if (cfg.public_key) setPublicKey(cfg.public_key)
+      })
+      .catch(() => {})
+  }, [config])
+
+  const handleSave = async () => {
+    if (!config) return
+    setSaving(true)
+    setMessage('')
+    try {
+      const result = await saveUnsandboxConfig(config, publicKey, secretKey)
+      setUnsandboxConfig(result)
+      setSecretKey('')
+      setMessage('Credentials saved.')
+    } catch (err) {
+      setMessage(`Save failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (!config) return
+    setChecking(true)
+    setMessage('')
+    try {
+      const s = await fetchUnsandboxStatus(config)
+      setStatus(s)
+      if (s.valid) {
+        setMessage('Connection verified.')
+      } else if (s.error) {
+        setMessage(`Validation failed: ${s.error}`)
+      } else if (!s.configured) {
+        setMessage('No credentials configured.')
+      }
+    } catch (err) {
+      setMessage(`Test failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const handleRemove = async () => {
+    if (!config) return
+    setSaving(true)
+    setMessage('')
+    try {
+      await deleteUnsandboxConfig(config)
+      setUnsandboxConfig(null)
+      setPublicKey('')
+      setSecretKey('')
+      setStatus(null)
+      setMessage('Credentials removed.')
+    } catch (err) {
+      setMessage(`Remove failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const isConfigured = unsandboxConfig?.configured ?? false
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border/20 bg-muted/10 p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-bold">Unsandbox</p>
+            <p className="text-[10px] text-muted-foreground">Remote code execution across 42+ languages via unsandbox.com</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isConfigured ? (
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-500">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Configured
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                <CircleDashed className="h-3.5 w-3.5" />
+                Not configured
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Public Key</label>
+            <input
+              type="text"
+              value={publicKey}
+              onChange={(e) => setPublicKey(e.target.value)}
+              placeholder="pk_..."
+              disabled={disabled || saving}
+              className="w-full rounded-lg border border-border/40 bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none disabled:opacity-50"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Secret Key {isConfigured && <span className="text-muted-foreground/60">(leave blank to keep current)</span>}
+            </label>
+            <input
+              type="password"
+              value={secretKey}
+              onChange={(e) => setSecretKey(e.target.value)}
+              placeholder={isConfigured ? '••••••••' : 'sk_...'}
+              disabled={disabled || saving}
+              className="w-full rounded-lg border border-border/40 bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={disabled || saving || !publicKey.trim() || (!secretKey.trim() && !isConfigured)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+            Save Keys
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={disabled || checking || !isConfigured}
+            className="flex items-center gap-1.5 rounded-lg border border-border/40 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {checking ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+            Test Connection
+          </button>
+          {isConfigured && (
+            <button
+              onClick={handleRemove}
+              disabled={disabled || saving}
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/20 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-red-500 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+              Remove
+            </button>
+          )}
+        </div>
+
+        {message && (
+          <p className={`text-[11px] font-medium ${message.includes('failed') || message.includes('Failed') ? 'text-red-500' : 'text-emerald-500'}`}>
+            {message}
+          </p>
+        )}
+
+        {status?.valid && status.key_info && (
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">API Key Status</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+              {status.key_info.tier && <><span className="text-muted-foreground">Tier</span><span className="font-mono">{String(status.key_info.tier)}</span></>}
+              {status.key_info.rate_per_minute && <><span className="text-muted-foreground">Rate</span><span className="font-mono">{String(status.key_info.rate_per_minute)}/min</span></>}
+              {status.key_info.concurrency && <><span className="text-muted-foreground">Concurrency</span><span className="font-mono">{String(status.key_info.concurrency)}</span></>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-[10px] text-muted-foreground leading-relaxed">
+        Credentials are stored at <code className="text-[10px] font-mono bg-muted/30 px-1 rounded">~/.unsandbox/accounts.csv</code> with restricted permissions (600).
+        You can also set <code className="text-[10px] font-mono bg-muted/30 px-1 rounded">UNSANDBOX_PUBLIC_KEY</code> and <code className="text-[10px] font-mono bg-muted/30 px-1 rounded">UNSANDBOX_SECRET_KEY</code> environment variables.
+      </p>
+    </div>
   )
 }
 

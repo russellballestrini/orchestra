@@ -648,3 +648,40 @@ export async function deleteMCPServer(config: BackendConfig, id: string): Promis
     method: 'DELETE',
   })
 }
+
+// --- Unsandbox Configuration ---
+
+export type UnsandboxConfig = {
+  configured: boolean
+  public_key: string
+  has_secret: boolean
+}
+
+export type UnsandboxStatus = {
+  configured: boolean
+  valid?: boolean
+  error?: string
+  key_info?: Record<string, unknown>
+}
+
+export async function fetchUnsandboxConfig(config: BackendConfig): Promise<UnsandboxConfig> {
+  return requestJSON<UnsandboxConfig>(config, '/api/v1/config/unsandbox')
+}
+
+export async function saveUnsandboxConfig(config: BackendConfig, publicKey: string, secretKey: string): Promise<UnsandboxConfig> {
+  return requestJSON<UnsandboxConfig>(config, '/api/v1/config/unsandbox', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ public_key: publicKey, secret_key: secretKey }),
+  })
+}
+
+export async function deleteUnsandboxConfig(config: BackendConfig): Promise<void> {
+  await requestJSON<void>(config, '/api/v1/config/unsandbox', {
+    method: 'DELETE',
+  })
+}
+
+export async function fetchUnsandboxStatus(config: BackendConfig): Promise<UnsandboxStatus> {
+  return requestJSON<UnsandboxStatus>(config, '/api/v1/unsandbox/status')
+}
