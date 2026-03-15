@@ -28,6 +28,7 @@ import (
 	"github.com/orchestra/orchestra/apps/backend/internal/terminal"
 	"github.com/orchestra/orchestra/apps/backend/internal/tools"
 	"github.com/orchestra/orchestra/apps/backend/internal/tracker"
+	"github.com/orchestra/orchestra/apps/backend/internal/unfirehose"
 	trackergithub "github.com/orchestra/orchestra/apps/backend/internal/tracker/github"
 	"github.com/orchestra/orchestra/apps/backend/internal/tracker/memory"
 	trackersqlite "github.com/orchestra/orchestra/apps/backend/internal/tracker/sqlite"
@@ -105,8 +106,17 @@ func Run(logger zerolog.Logger) error {
 	go startRefreshWorker(orchestratorService, pubsub, logger)
 	go telemetry.StartWatcher(context.Background(), warehouseDB, cfg.ProjectRoots, logger)
 
+	// Initialize unfirehose/1.0 session logger
+	var ufLogger *unfirehose.Logger
+	if ufL, err := unfirehose.NewLogger("0.1.0"); err != nil {
+		logger.Warn().Err(err).Msg("unfirehose logger disabled")
+	} else {
+		ufLogger = ufL
+		logger.Info().Msg("unfirehose/1.0 session logging enabled")
+	}
+
 	toolExecutor := tools.NewLinearToolExecutor(trackerClient)
-	go startExecutionWorker(orchestratorService, agentRegistry, provider, cfg.AgentProvider, cfg.WorkspaceRoot, cfg.WorkflowFile, cfg.AgentMaxTurns, toolExecutor.Execute, tools.TrackerToolSpecs(), cfg.WorkspaceHooks, pubsub, warehouseDB, logger)
+	go startExecutionWorker(orchestratorService, agentRegistry, provider, cfg.AgentProvider, cfg.WorkspaceRoot, cfg.WorkflowFile, cfg.AgentMaxTurns, toolExecutor.Execute, tools.TrackerToolSpecs(), cfg.WorkspaceHooks, pubsub, warehouseDB, ufLogger, logger)
 
 	logger.Info().Str("addr", addr).Str("service_id", runtime.ServiceOrchestrator).Msg("starting orchestrad")
 
@@ -163,6 +173,7 @@ func startExecutionWorker(
 	workspaceHooks workspace.Hooks,
 	pubsub *observability.PubSub,
 	warehouseDB *db.DB,
+	ufLogger *unfirehose.Logger,
 	logger zerolog.Logger,
 ) {
 	workspaceService := workspace.Service{Root: workspaceRoot}
@@ -170,7 +181,7 @@ func startExecutionWorker(
 	defer ticker.Stop()
 
 	for range ticker.C {
-		processExecutionTick(service, workspaceService, registry, provider, providerName, workspaceRoot, workflowFile, agentMaxTurns, toolExecutor, toolSpecs, workspaceHooks, pubsub, warehouseDB, logger)
+		processExecutionTick(service, workspaceService, registry, provider, providerName, workspaceRoot, workflowFile, agentMaxTurns, toolExecutor, toolSpecs, workspaceHooks, pubsub, warehouseDB, ufLogger, logger)
 	}
 }
 
@@ -188,6 +199,7 @@ func processExecutionTick(
 	workspaceHooks workspace.Hooks,
 	pubsub *observability.PubSub,
 	warehouseDB *db.DB,
+	ufLogger *unfirehose.Logger,
 	logger zerolog.Logger,
 ) {
 	entry, ok := service.ClaimNextRunnable()
@@ -381,6 +393,14 @@ func processExecutionTick(
 	sessionID := fmt.Sprintf("%s-%d", entry.IssueIdentifier, time.Now().UnixNano())
 	_ = logfile.ResetLatestLog(workspaceRoot, entry.IssueIdentifier, sessionID)
 
+	// Start unfirehose session logging
+	if ufLogger != nil {
+		if err := ufLogger.StartSession(sessionID, workspaceRoot, renderedPrompt); err != nil {
+			logger.Warn().Err(err).Msg("unfirehose: failed to start session")
+		}
+		_ = ufLogger.LogUserMessage(sessionID, renderedPrompt)
+	}
+
 	if warehouseDB != nil {
 		rootPath, remoteURL, _ := git.ProjectInfo(context.Background(), workspaceRoot)
 		projectID, err := warehouseDB.UpsertProject(context.Background(), rootPath, remoteURL)
@@ -418,6 +438,15 @@ func processExecutionTick(
 		// Append to log file in real-time
 		if event.SessionID != "" && event.RawLine != "" {
 			_, _ = logfile.AppendToSessionLog(workspaceRoot, entry.IssueIdentifier, event.SessionID, event.RawLine+"\n")
+		}
+
+		// Write to unfirehose/1.0 JSONL
+		if ufLogger != nil && event.Message != "" {
+			_ = ufLogger.LogAssistantMessage(sessionID, event.Message, "", activeProviderName, &unfirehose.Usage{
+				InputTokens:  event.Usage.InputTokens,
+				OutputTokens: event.Usage.OutputTokens,
+				TotalTokens:  event.Usage.TotalTokens,
+			})
 		}
 
 		// Log to stdout for TUI visibility
@@ -499,6 +528,15 @@ func processExecutionTick(
 		logger.Info().Str("issue_id", entry.IssueID).Str("session_id", result.SessionID).Int64("attempt", attempt).Msg("turn completed; continuing")
 		publishSnapshot(pubsub, service)
 		return
+	}
+
+	// Close unfirehose session on success
+	if ufLogger != nil {
+		_ = ufLogger.CloseSession(sessionID, &unfirehose.Usage{
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+			TotalTokens:  result.Usage.TotalTokens,
+		})
 	}
 
 	service.RecordRunSuccess(entry.IssueID, activeProviderName)

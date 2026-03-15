@@ -7,10 +7,17 @@ require (
 	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
+	github.com/unsandbox/un-go-async v0.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
+
+// Local development: point to the un-inception checkout.
+// For production, either:
+//   1. Publish the module to git.unturf.com and remove replace, or
+//   2. Keep replace pointing to a stable local path.
+replace github.com/unsandbox/un-go-async => ../../../../un-inception/clients/go/async
 
 require (
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
