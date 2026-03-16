@@ -7,9 +7,16 @@ require (
 	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
+	github.com/russellballestrini/un-inception/clients/go/sync/src v0.0.0
+	github.com/russellballestrini/unfirehose-sdks/go v0.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
+)
+
+replace (
+	github.com/russellballestrini/un-inception/clients/go/sync/src => /home/fox/git/un-inception/clients/go/sync/src
+	github.com/russellballestrini/unfirehose-sdks/go => /home/fox/git/unfirehose-sdks/go
 )
 
 require (
