@@ -85,10 +85,19 @@ func (r *UnsandboxRunner) RunTurn(ctx context.Context, request TurnRequest, onEv
 	// 2. Bootstrap: sync credentials, inject project files, install agent
 	emit("bootstrap_started", "bootstrapping container", nil)
 
-	// Sync credentials
+	// Sync Claude credentials
 	if credScript := syncCredentials(); credScript != "" {
 		if _, err := r.client.ShellSession(ctx, remoteSessionID, credScript); err != nil {
 			emit("bootstrap_warning", fmt.Sprintf("credential sync failed: %s", err), nil)
+		}
+	}
+
+	// Sync SSH key + known_hosts + config so private repos clone seamlessly
+	if sshScript := syncSSHKey(); sshScript != "" {
+		if _, err := r.client.ShellSession(ctx, remoteSessionID, sshScript); err != nil {
+			emit("bootstrap_warning", fmt.Sprintf("ssh key sync failed: %s", err), nil)
+		} else {
+			emit("bootstrap", "ssh key synced", nil)
 		}
 	}
 
@@ -261,6 +270,12 @@ func (r *UnsandboxRunner) RunTurn(ctx context.Context, request TurnRequest, onEv
 // to inject them into the container with secure permissions.
 func syncCredentials() string {
 	return unsandbox.SyncClaudeCredentials()
+}
+
+// syncSSHKey reads the local SSH private key and supporting files and returns
+// shell commands to inject them into the container with secure permissions.
+func syncSSHKey() string {
+	return unsandbox.SyncSSHKey()
 }
 
 // extractTarGz extracts a gzipped tarball into a directory.

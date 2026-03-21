@@ -46,6 +46,61 @@ func SyncClaudeCredentials() string {
 	return strings.Join(lines, "\n")
 }
 
+// SyncSSHKey reads the local SSH private key and supporting files, and returns
+// shell commands to inject them into a container with secure permissions.
+// Tries id_ed25519, id_ecdsa, id_rsa in order. Also syncs known_hosts and
+// ~/.ssh/config so host verification works without prompts.
+// Returns empty string if no key is found (non-fatal).
+func SyncSSHKey() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+
+	sshDir := filepath.Join(u.HomeDir, ".ssh")
+
+	// Find the first available private key
+	keyNames := []string{"id_ed25519", "id_ecdsa", "id_rsa"}
+	var keyData []byte
+	var keyName string
+	for _, name := range keyNames {
+		data, err := os.ReadFile(filepath.Join(sshDir, name))
+		if err == nil && len(data) > 0 {
+			keyData = data
+			keyName = name
+			break
+		}
+	}
+	if keyData == nil {
+		return ""
+	}
+
+	lines := []string{
+		"umask 077 && mkdir -p ~/.ssh",
+		"chmod 700 ~/.ssh",
+		fmt.Sprintf("printf '%%s' %s | base64 -d > ~/.ssh/%s", shellQuote(base64.StdEncoding.EncodeToString(keyData)), shellQuote(keyName)),
+		fmt.Sprintf("chmod 600 ~/.ssh/%s", shellQuote(keyName)),
+	}
+
+	// Sync known_hosts so StrictHostKeyChecking doesn't block clones
+	if khData, err := os.ReadFile(filepath.Join(sshDir, "known_hosts")); err == nil && len(khData) > 0 {
+		lines = append(lines,
+			fmt.Sprintf("printf '%%s' %s | base64 -d > ~/.ssh/known_hosts", shellQuote(base64.StdEncoding.EncodeToString(khData))),
+			"chmod 644 ~/.ssh/known_hosts",
+		)
+	}
+
+	// Sync ~/.ssh/config for custom host entries (e.g. git.unturf.com)
+	if cfgData, err := os.ReadFile(filepath.Join(sshDir, "config")); err == nil && len(cfgData) > 0 {
+		lines = append(lines,
+			fmt.Sprintf("printf '%%s' %s | base64 -d > ~/.ssh/config", shellQuote(base64.StdEncoding.EncodeToString(cfgData))),
+			"chmod 600 ~/.ssh/config",
+		)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 // shellQuote wraps a value in single quotes, escaping embedded single quotes.
 func shellQuote(value string) string {
 	if value == "" {
