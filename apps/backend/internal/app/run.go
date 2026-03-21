@@ -280,6 +280,14 @@ func processExecutionTick(
 		}
 	}
 
+	// Verify the agent binary is installed before doing any workspace work.
+	if err := registry.CheckBinary(activeProvider); err != nil {
+		service.ReleaseClaim(entry.IssueID)
+		logger.Error().Err(err).Str("issue_id", entry.IssueID).Str("provider", activeProviderName).Msg("agent binary not available; skipping dispatch")
+		publishSnapshot(pubsub, service)
+		return
+	}
+
 	// If the task belongs to a project, use the project's root_path as the workspace
 	// so the agent operates on the actual codebase, not an empty temp directory.
 	var workspacePath string

@@ -208,7 +208,7 @@ func Load() (Config, error) {
 
 	activeStates := parseStateList(activeStatesRaw)
 	if len(activeStates) == 0 {
-		activeStates = []string{"Todo", "In Progress"}
+		activeStates = []string{"In Progress"}
 	}
 
 	terminalStates := parseStateList(terminalStatesRaw)

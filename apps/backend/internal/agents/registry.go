@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/orchestra/orchestra/apps/backend/internal/terminal"
@@ -14,6 +15,7 @@ import (
 // for the orchestrator to invoke any configured agent.
 type Registry struct {
 	runners     map[Provider]Runner
+	commands    map[Provider]string // first token of each registered command, for binary checks
 	termManager *terminal.Manager
 }
 
@@ -28,6 +30,7 @@ func NewRegistry(commandByProvider map[string]string) *Registry {
 func NewRegistryWithTerminal(commandByProvider map[string]string, tm *terminal.Manager) *Registry {
 	r := &Registry{
 		runners:     map[Provider]Runner{},
+		commands:    map[Provider]string{},
 		termManager: tm,
 	}
 	for provider, command := range commandByProvider {
@@ -52,6 +55,23 @@ func (r *Registry) HasProvider(provider Provider) bool {
 	return ok
 }
 
+// CheckBinary verifies that the agent binary for the given provider is present
+// in PATH. Returns nil for remote providers (UNSANDBOX) which have no local
+// binary requirement. Returns an error if the binary cannot be found.
+func (r *Registry) CheckBinary(provider Provider) error {
+	if provider == ProviderUnsandbox {
+		return nil
+	}
+	binary, ok := r.commands[provider]
+	if !ok {
+		return fmt.Errorf("provider %s has no registered command", provider)
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		return fmt.Errorf("agent binary %q not found in PATH for provider %s — is it installed?", binary, provider)
+	}
+	return nil
+}
+
 // Providers returns a slice of all currently registered provider identifiers.
 func (r *Registry) Providers() []Provider {
 	providers := make([]Provider, 0, len(r.runners))
@@ -70,6 +90,10 @@ func (r *Registry) SetCommand(provider Provider, command string) {
 		return
 	}
 	p := NormalizeProvider(string(provider))
+	// Store the binary name (first token) for pre-dispatch availability checks.
+	if binary := strings.Fields(command)[0]; binary != "" {
+		r.commands[p] = binary
+	}
 	if p == ProviderCodex && strings.Contains(strings.ToLower(command), "app-server") {
 		r.runners[p] = NewCodexAppServerRunner(command)
 		return
