@@ -92,13 +92,20 @@ func (r *UnsandboxRunner) RunTurn(ctx context.Context, request TurnRequest, onEv
 		}
 	}
 
-	// Sync SSH key + known_hosts + config so private repos clone seamlessly
-	if sshScript := syncSSHKey(); sshScript != "" {
+	// Sync SSH key + known_hosts + config so private repos clone seamlessly.
+	// If forwarding is enabled and the key cannot be read, abort — never proceed
+	// without auth when the user has opted into SSH forwarding.
+	sshScript, sshErr := syncSSHKey()
+	if sshErr != nil {
+		emit("error", fmt.Sprintf("ssh key sync: %s", sshErr), nil)
+		return TurnResult{Provider: ProviderUnsandbox, SessionID: sessionID, ExitCode: 1, Output: sshErr.Error()}, sshErr
+	}
+	if sshScript != "" {
 		if _, err := r.client.ShellSession(ctx, remoteSessionID, sshScript); err != nil {
-			emit("bootstrap_warning", fmt.Sprintf("ssh key sync failed: %s", err), nil)
-		} else {
-			emit("bootstrap", "ssh key synced", nil)
+			emit("error", fmt.Sprintf("ssh key injection failed: %s", err), nil)
+			return TurnResult{Provider: ProviderUnsandbox, SessionID: sessionID, ExitCode: 1, Output: err.Error()}, err
 		}
+		emit("bootstrap", "ssh key synced", nil)
 	}
 
 	// Inject project files into container
@@ -274,7 +281,9 @@ func syncCredentials() string {
 
 // syncSSHKey reads the local SSH private key and supporting files and returns
 // shell commands to inject them into the container with secure permissions.
-func syncSSHKey() string {
+// Returns ("", nil) when forwarding is disabled. Returns ("", error) when
+// forwarding is enabled but the key cannot be resolved — callers must not proceed.
+func syncSSHKey() (string, error) {
 	return unsandbox.SyncSSHKey()
 }
 

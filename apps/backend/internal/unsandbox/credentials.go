@@ -48,26 +48,28 @@ func SyncClaudeCredentials() string {
 
 // SyncSSHKey reads the user's SSH config preferences and returns shell commands
 // to inject the selected private key and supporting files into a container with
-// secure permissions. Returns empty string if forwarding is disabled or no key
-// is available.
-func SyncSSHKey() string {
+// secure permissions.
+//
+// Returns ("", nil) when forwarding is disabled — intentional, not an error.
+// Returns ("", error) when forwarding is enabled but the key cannot be resolved
+// or read. Callers must treat this as a hard failure and not proceed.
+func SyncSSHKey() (string, error) {
 	cfg := LoadSSHConfig()
 	if !cfg.ForwardEnabled {
-		return ""
+		return "", nil
 	}
 
 	u, err := user.Current()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("ssh key sync: cannot determine home directory: %w", err)
 	}
 	sshDir := filepath.Join(u.HomeDir, ".ssh")
 
-	// Resolve which key to use
+	// Resolve which key to use — explicit path takes priority over auto-detect.
 	var keyPath string
 	if cfg.KeyPath != "" {
 		keyPath = cfg.KeyPath
 	} else {
-		// Auto-detect: first available key
 		for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
 			p := filepath.Join(sshDir, name)
 			if _, err := os.Stat(p); err == nil {
@@ -77,12 +79,15 @@ func SyncSSHKey() string {
 		}
 	}
 	if keyPath == "" {
-		return ""
+		return "", fmt.Errorf("ssh key sync: forwarding is enabled but no SSH key found in %s", sshDir)
 	}
 
 	keyData, err := os.ReadFile(keyPath)
-	if err != nil || len(keyData) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("ssh key sync: cannot read key %s: %w", keyPath, err)
+	}
+	if len(keyData) == 0 {
+		return "", fmt.Errorf("ssh key sync: key file %s is empty", keyPath)
 	}
 	keyName := filepath.Base(keyPath)
 
@@ -109,7 +114,7 @@ func SyncSSHKey() string {
 		)
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), nil
 }
 
 // shellQuote wraps a value in single quotes, escaping embedded single quotes.
