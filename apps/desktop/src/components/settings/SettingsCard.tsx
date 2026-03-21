@@ -12,6 +12,9 @@ import {
   fetchUnsandboxStatus,
   fetchAgentProviderKeys,
   saveAgentProviderKey,
+  fetchSSHConfig,
+  saveSSHConfig,
+  type SSHConfig,
   type UnsandboxConfig,
   type UnsandboxStatus,
 } from '@/lib/orchestra-client'
@@ -202,6 +205,7 @@ export function SettingsCard({
             <div className="space-y-6">
               <EmbeddedAgentConfigForm config={config} disabled={savingConfig || loadingConfig} />
               <UnsandboxConfigForm config={config} disabled={savingConfig || loadingConfig} />
+              <SSHConfigForm config={config} disabled={savingConfig || loadingConfig} />
             </div>
           )}
 
@@ -1217,6 +1221,133 @@ function UnsandboxConfigForm({ config, disabled }: { config: BackendConfig | nul
           API docs <ExternalLink className="h-2.5 w-2.5" />
         </button>
       </p>
+    </div>
+  )
+}
+
+function SSHConfigForm({ config, disabled }: { config: BackendConfig | null; disabled: boolean }) {
+  const [sshConfig, setSSHConfig] = useState<SSHConfig | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (!config) return
+    fetchSSHConfig(config)
+      .then(setSSHConfig)
+      .catch(() => setSSHConfig({ forward_enabled: true, key_path: '', available_keys: [] }))
+  }, [config])
+
+  const handleToggle = async () => {
+    if (!config || !sshConfig) return
+    const next = { ...sshConfig, forward_enabled: !sshConfig.forward_enabled }
+    setSaving(true)
+    setMessage('')
+    try {
+      const result = await saveSSHConfig(config, next.forward_enabled, next.key_path)
+      setSSHConfig(result)
+    } catch (err) {
+      setMessage(`Save failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleKeyChange = async (keyPath: string) => {
+    if (!config || !sshConfig) return
+    const next = { ...sshConfig, key_path: keyPath }
+    setSaving(true)
+    setMessage('')
+    try {
+      const result = await saveSSHConfig(config, next.forward_enabled, next.key_path)
+      setSSHConfig(result)
+      setMessage('Saved.')
+    } catch (err) {
+      setMessage(`Save failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const forwardEnabled = sshConfig?.forward_enabled ?? true
+  const selectedKey = sshConfig?.key_path ?? ''
+  const availableKeys = sshConfig?.available_keys ?? []
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 pb-1 border-b border-border/20">
+        <ShieldCheck className="h-3.5 w-3.5 text-primary/70" />
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-foreground/80">SSH Key Forwarding</h3>
+      </div>
+
+      <div className="group relative flex items-center justify-between p-4 rounded-xl border border-border/40 bg-gradient-to-b from-card via-card to-muted/20 overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br from-primary/[0.03] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+        <div className="space-y-0.5">
+          <p className="text-xs font-black tracking-tight">Forward SSH Key to Sandbox</p>
+          <p className="text-[10px] text-muted-foreground">Inject your SSH key into unsandbox containers so agents can clone private repos</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-[9px] font-bold uppercase tracking-widest ${forwardEnabled ? 'text-primary' : 'text-muted-foreground/30'}`}>
+            {forwardEnabled ? 'On' : 'Off'}
+          </span>
+          <button
+            onClick={handleToggle}
+            disabled={disabled || saving || !sshConfig}
+            className={`h-8 w-14 rounded-full transition-colors ${forwardEnabled ? 'bg-primary' : 'bg-muted'} relative disabled:opacity-40`}
+          >
+            <div className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${forwardEnabled ? 'left-7' : 'left-1'}`} />
+          </button>
+        </div>
+      </div>
+
+      {forwardEnabled && (
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Keypair
+          </label>
+          {availableKeys.length === 0 ? (
+            <p className="text-[10px] text-muted-foreground/60">No SSH keys found in ~/.ssh/</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-muted/10 cursor-pointer hover:border-primary/30 transition-colors">
+                <input
+                  type="radio"
+                  name="ssh_key"
+                  value=""
+                  checked={selectedKey === ''}
+                  onChange={() => handleKeyChange('')}
+                  disabled={disabled || saving}
+                  className="accent-primary"
+                />
+                <div>
+                  <p className="text-xs font-bold">Auto-detect</p>
+                  <p className="text-[10px] text-muted-foreground">Use first available key (id_ed25519 → id_ecdsa → id_rsa)</p>
+                </div>
+              </label>
+              {availableKeys.map((keyPath) => (
+                <label key={keyPath} className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-muted/10 cursor-pointer hover:border-primary/30 transition-colors">
+                  <input
+                    type="radio"
+                    name="ssh_key"
+                    value={keyPath}
+                    checked={selectedKey === keyPath}
+                    onChange={() => handleKeyChange(keyPath)}
+                    disabled={disabled || saving}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="text-xs font-bold font-mono">{keyPath.split('/').pop()}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">{keyPath}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {message && (
+        <p className="text-[10px] text-muted-foreground">{message}</p>
+      )}
     </div>
   )
 }

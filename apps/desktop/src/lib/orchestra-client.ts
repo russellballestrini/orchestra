@@ -1493,6 +1493,41 @@ export async function fetchUnsandboxStatus(config: BackendConfig): Promise<Unsan
   return requestJSON<UnsandboxStatus>(config, '/api/v1/unsandbox/status')
 }
 
+/** SSH forwarding configuration for unsandbox containers. */
+export type SSHConfig = {
+  forward_enabled: boolean
+  key_path: string
+  available_keys: string[]
+}
+
+/**
+ * Fetches the current SSH forwarding configuration and available keys.
+ * @param config - Backend connection configuration.
+ * @returns The SSH config state.
+ */
+export async function fetchSSHConfig(config: BackendConfig): Promise<SSHConfig> {
+  return requestJSON<SSHConfig>(config, '/api/v1/config/ssh')
+}
+
+/**
+ * Saves the SSH forwarding configuration.
+ * @param config - Backend connection configuration.
+ * @param forwardEnabled - Whether to inject the SSH key into containers.
+ * @param keyPath - Absolute path to the private key, or empty for auto-detect.
+ * @returns Updated SSH config state.
+ */
+export async function saveSSHConfig(
+  config: BackendConfig,
+  forwardEnabled: boolean,
+  keyPath: string,
+): Promise<SSHConfig> {
+  return requestJSON<SSHConfig>(config, '/api/v1/config/ssh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forward_enabled: forwardEnabled, key_path: keyPath }),
+  })
+}
+
 /** Result of executing code in the Unsandbox remote environment. */
 export type UnsandboxExecuteResult = {
   status: string

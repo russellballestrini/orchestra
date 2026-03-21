@@ -190,6 +190,10 @@ func NewRouterWithPubSub(
 	protected.Post("/api/v1/config/unsandbox", server.PostUnsandboxConfig)
 	protected.Delete("/api/v1/config/unsandbox", server.DeleteUnsandboxConfig)
 
+	// SSH forwarding configuration
+	protected.Get("/api/v1/config/ssh", server.GetSSHConfig)
+	protected.Post("/api/v1/config/ssh", server.PostSSHConfig)
+
 	// Agent provider API keys (embedded agent widget)
 	protected.Get("/api/v1/config/agent-providers", server.HandleGetAgentProviders)
 	protected.Post("/api/v1/config/agent-providers", server.HandleSaveAgentProvider)
