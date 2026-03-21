@@ -24,6 +24,7 @@ export function CreateTaskDialog({
   allTools: _allTools = [],
   projects = [],
   initialProjectID = '',
+  hasUnsandbox = false,
   onSubmit,
 }: {
   open: boolean
@@ -34,6 +35,7 @@ export function CreateTaskDialog({
   allTools?: MCPTool[]
   projects?: Project[]
   initialProjectID?: string
+  hasUnsandbox?: boolean
   onSubmit: (payload: IssueCreatePayload) => Promise<void>
 }) {
   const [title, setTitle] = useState('')
@@ -41,6 +43,7 @@ export function CreateTaskDialog({
   const [state, setState] = useState(initialState)
   const [assignee, setAssignee] = useState('Unassigned')
   const [provider, setProvider] = useState('')
+  const [harness, setHarness] = useState<'local' | 'unsandbox'>('local')
   const [disabledTools, setDisabledTools] = useState<string[]>([])
   const [projectID, setProjectID] = useState(initialProjectID || (projects.length > 0 ? projects[0].id : ''))
   const [pending, setPending] = useState(false)
@@ -60,6 +63,7 @@ export function CreateTaskDialog({
       setDescription('')
       setAssignee('Unassigned')
       setProvider(availableAgents.length > 0 ? availableAgents[0] : '')
+      setHarness('local')
       setDisabledTools([])
       setSubmitError('')
     }
@@ -96,7 +100,7 @@ export function CreateTaskDialog({
         state,
         assignee_id: assignee,
         project_id: projectID,
-        provider,
+        provider: harness === 'unsandbox' ? 'UNSANDBOX' : provider,
         disabled_tools: disabledTools
       })
       onOpenChange(false)
@@ -195,19 +199,42 @@ export function CreateTaskDialog({
                 onChange={setProjectID}
               />
               <div className="w-px h-4 bg-border/20 mx-1" />
-              <AgentSelector
-                value={assignee}
-                agents={availableAgents}
-                onChange={(val) => {
-                  setAssignee(val)
-                  const agentName = val.replace('agent-', '')
-                  if (availableAgents.includes(agentName)) {
-                    setProvider(agentName)
-                  } else if (val === '') {
-                    setProvider(availableAgents.length > 0 ? availableAgents[0] : '')
-                  }
-                }}
-              />
+              {hasUnsandbox && (
+                <>
+                  <div className="flex items-center rounded-md border border-border/20 bg-muted/20 p-0.5 gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setHarness('local')}
+                      className={`h-5 px-2 rounded text-[10px] font-bold uppercase tracking-widest transition-colors ${harness === 'local' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground/50 hover:text-foreground'}`}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHarness('unsandbox')}
+                      className={`h-5 px-2 rounded text-[10px] font-bold uppercase tracking-widest transition-colors ${harness === 'unsandbox' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground/50 hover:text-foreground'}`}
+                    >
+                      Unsandbox
+                    </button>
+                  </div>
+                  <div className="w-px h-4 bg-border/20 mx-1" />
+                </>
+              )}
+              {harness === 'local' && (
+                <AgentSelector
+                  value={assignee}
+                  agents={availableAgents}
+                  onChange={(val) => {
+                    setAssignee(val)
+                    const agentName = val.replace('agent-', '')
+                    if (availableAgents.includes(agentName)) {
+                      setProvider(agentName)
+                    } else if (val === '') {
+                      setProvider(availableAgents.length > 0 ? availableAgents[0] : '')
+                    }
+                  }}
+                />
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Button

@@ -23,6 +23,7 @@ import {
   fetchProjects,
   fetchState,
   fetchWarehouseStats,
+  fetchUnsandboxStatus,
   isUnauthorizedError,
   normalizeEventEnvelope,
   normalizeSnapshotPayload,
@@ -107,6 +108,7 @@ export default function App() {
   const [agentConfig, setAgentConfig] = useState<{ commands: Record<string, string>; agent_provider: string; max_turns: number } | null>(null)
   const [availableAgents, setAvailableAgents] = useState<string[]>([])
   const [allTools, setAllTools] = useState<ToolSummary[]>([])
+  const [unsandboxConfigured, setUnsandboxConfigured] = useState(false)
   const [loadingState, setLoadingState] = useState(true)
   const [usePolling, setUsePolling] = useState(false)
   const syncControls = useRef<{ startPolling: () => void; stopPolling: () => void } | null>(null)
@@ -303,6 +305,10 @@ export default function App() {
       fetchMCPTools(config)
         .then(tools => mounted && setAllTools(tools))
         .catch(() => mounted && setAllTools([]))
+
+      fetchUnsandboxStatus(config)
+        .then(s => mounted && setUnsandboxConfigured(s.configured === true && s.valid === true))
+        .catch(() => mounted && setUnsandboxConfigured(false))
     }
     // Section-specific data loading with global loading state
     const loadRequiredData = async () => {
@@ -1263,6 +1269,7 @@ export default function App() {
         allTools={allTools}
         projects={projects}
         initialProjectID={selectedProjectID || ''}
+        hasUnsandbox={unsandboxConfigured}
         onSubmit={handleTaskSubmit}
       />
 
